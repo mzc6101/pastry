@@ -81,3 +81,7 @@ Create the identity once: `openssl req -x509 -newkey rsa:2048 -nodes -days 3650 
 
 ### Launch video
 `launch-video/` is a Remotion project (`npm install`, then `npx remotion render src/index.ts Pastry out/pastry-launch.mp4`). App icons are not checked in: export them from `/System/Applications/*.app` into `launch-video/public/apps/` (finder, mail, messages, notes, photos, preview, safari, terminal `.png`) before rendering.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
