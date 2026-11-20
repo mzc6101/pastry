@@ -1,0 +1,8 @@
+build/
+*.dmg
+.DS_Store
+ANALYSIS.md
+real.png
+launch-video/node_modules/
+launch-video/out/
+launch-video/public/apps/
