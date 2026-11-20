@@ -15,7 +15,7 @@ A clipboard history is a small, basic utility. It shouldn't cost a monthly fee.
 
 Over the last few years, many popular clipboard managers have moved to subscriptions, and some people who paid for what they understood to be a one-time or "lifetime" purchase feel they ended up being pushed toward recurring payments anyway. I think charging a subscription for something this basic is wrong.
 
-So Pastry is the opposite: **free, open source, no account, no subscription, no tracking.** Your history never leaves your Mac. If you find it useful, you can [buy me a coffee](https://donate.stripe.com/bJe8wP2KW9eH5hx945aEE00), but you never have to.
+So Pastry is the opposite: **free, open source, no account, no subscription, no tracking.** Your history never leaves your Mac.
 
 ## What it does
 
@@ -50,10 +50,6 @@ So Pastry is the opposite: **free, open source, no account, no subscription, no 
 1. **[Download Pastry.dmg](https://github.com/mzc6101/pastry/releases/latest/download/Pastry.dmg)**, open it and drag **Pastry** to **Applications**.
 2. Pastry isn't notarized by Apple yet, so macOS blocks the first launch. Right-click Pastry in Applications → **Open** → **Open**. Or run `xattr -dr com.apple.quarantine /Applications/Pastry.app`.
 3. A short tour walks you through it. Grant Accessibility when asked (System Settings → Privacy & Security → Accessibility) so Pastry can paste for you. Then press ⇧⌘V anywhere.
-
-## Support
-
-Pastry is free and always will be. If it saves you time, you can [**buy me a coffee ☕**](https://donate.stripe.com/bJe8wP2KW9eH5hx945aEE00).
 
 ---
 
