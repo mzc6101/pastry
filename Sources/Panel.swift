@@ -6,6 +6,7 @@ final class Panel: NSPanel, NSTextFieldDelegate, NSMenuDelegate, NSPopoverDelega
     let store: Store; let search = NSTextField(); let scroll = NSScrollView(); let doc = NSView(); let hint = NSTextField(labelWithString: "")
     let banner = AXBanner(), seg = PillSegmented(items: [("Clipboard", "doc.on.clipboard"), ("Pinned", "pin.fill")], frame: NSRect(x: 0, y: 0, width: 232, height: 34))
     var rows: [Store.Row] = []; var cards: [CardView] = []; var sel = 0; var target: NSRunningApplication?; var pinOnly = false
+    var picked: [Int64] = []   // ⌘-click / ⇧-click multi-selection, in pick order
     var onSettings: (() -> Void)?
     var holdOpen = 0, popover: NSPopover?, sharePicker: NSSharingServicePicker?, quickLookURL: URL?   // holdOpen > 0: a menu / editor / picker owns focus, so never auto-close
     // suggestions: the right-most 3 tiles, behind a divider; ignored by search / pin filter
@@ -38,8 +39,8 @@ final class Panel: NSPanel, NSTextFieldDelegate, NSMenuDelegate, NSPopoverDelega
         let gear = NSButton(image: Glass.symbol("gearshape", size: 14, weight: .medium) ?? NSImage(), target: self, action: #selector(openSettings))
         Glass.style(gear, circle: true); gear.imagePosition = .imageOnly; gear.toolTip = "Settings (⌘,)"
         gear.frame = NSRect(x: bw - 22 - 34, y: top, width: 34, height: 34); gear.autoresizingMask = [.minXMargin, .minYMargin]; content.addSubview(gear)
-        hint.stringValue = "↩ Paste   ⇧↩ Plain   ⌘P Pin   ⇥ Filter   ⇧→ Suggested   esc Close"; hint.font = .systemFont(ofSize: 11, weight: .medium); hint.textColor = .tertiaryLabelColor
-        hint.alignment = .right; hint.frame = NSRect(x: bw - 22 - 76 - 14 - 420, y: top + 9, width: 420, height: 16); hint.autoresizingMask = [.minXMargin, .minYMargin]; content.addSubview(hint)
+        hint.stringValue = "↩ Paste   ⇧↩ Plain   ⌘-click Multi   ⌘P Pin   ⇥ Filter   ⇧→ Suggested   esc Close"; hint.font = .systemFont(ofSize: 11, weight: .medium); hint.textColor = .tertiaryLabelColor
+        hint.alignment = .right; hint.frame = NSRect(x: bw - 22 - 76 - 14 - 520, y: top + 9, width: 520, height: 16); hint.autoresizingMask = [.minXMargin, .minYMargin]; content.addSubview(hint)
         sparkle.target = self; sparkle.action = #selector(toggleSuggestions); sparkle.imagePosition = .imageOnly; Glass.style(sparkle, circle: true)
         sparkle.frame = NSRect(x: bw - 22 - 34 - 8 - 34, y: top, width: 34, height: 34); sparkle.autoresizingMask = [.minXMargin, .minYMargin]; content.addSubview(sparkle)
         banner.onLayout = { [weak self] in self?.layoutBanner() }; banner.autoresizingMask = [.minXMargin, .minYMargin]; content.addSubview(banner)
@@ -67,7 +68,7 @@ final class Panel: NSPanel, NSTextFieldDelegate, NSMenuDelegate, NSPopoverDelega
         let scr = NSScreen.main ?? NSScreen.screens[0], vf = scr.visibleFrame   // visibleFrame sits above the Dock
         let end = NSRect(x: scr.frame.minX, y: vf.minY, width: scr.frame.width, height: Panel.height)
         if !isVisible { setFrame(end.offsetBy(dx: 0, dy: -60), display: false); alphaValue = 0 }
-        closing = false; search.stringValue = ""; pinOnly = false; seg.index = 0; layoutRegions(end.width); reload(); refreshSuggestions()
+        closing = false; search.stringValue = ""; pinOnly = false; picked = []; seg.index = 0; layoutRegions(end.width); reload(); refreshSuggestions()
         makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); makeFirstResponder(search)
         banner.update(); layoutBanner()
         NSAnimationContext.runAnimationGroup { c in c.duration = 0.34; c.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1); animator().setFrame(end, display: true); animator().alphaValue = 1 }
@@ -110,7 +111,7 @@ final class Panel: NSPanel, NSTextFieldDelegate, NSMenuDelegate, NSPopoverDelega
         let s = CardView.size, h = scroll.frame.height
         cards = rows.enumerated().map { i, r in
             let c = CardView(row: r, index: i, store: store); c.frame.origin = NSPoint(x: 17 + CGFloat(i) * (s.width + 2), y: max(0, (h - s.height) / 2))
-            c.onClick = { [weak self] i, n in self?.select(i); if n >= 2 { self?.choose() } }; c.onMenu = { [weak self] in self?.menu(for: $0) }; doc.addSubview(c); return c }
+            c.onClick = { [weak self] i, n in self?.click(i, n) }; c.onMenu = { [weak self] in self?.menu(for: $0) }; doc.addSubview(c); return c }
         doc.frame = NSRect(x: 0, y: 0, width: max(scroll.frame.width, 34 + CGFloat(rows.count) * (s.width + 2)), height: h)
         sel = 0; select(0)
     }
@@ -120,9 +121,27 @@ final class Panel: NSPanel, NSTextFieldDelegate, NSMenuDelegate, NSPopoverDelega
         sel = max(0, min(cards.count - 1, i)); syncSelection()
         doc.scrollToVisible(cards[sel].frame.insetBy(dx: -14, dy: 0))
     }
+    /// Plain click selects (double-click pastes); ⌘-click toggles a card in the multi-selection; ⇧-click adds the range from the current card.
+    private func click(_ i: Int, _ n: Int) {
+        let m = NSApp.currentEvent?.modifierFlags ?? []
+        guard i < rows.count else { return }
+        if m.contains(.command) {
+            if picked.isEmpty, !inSide, sel != i, sel < rows.count { picked = [rows[sel].id] }   // the card you started on counts as #1
+            let id = rows[i].id
+            if let k = picked.firstIndex(of: id) { picked.remove(at: k) } else { picked.append(id) }
+        } else if m.contains(.shift) {
+            let from = inSide ? i : sel
+            if picked.isEmpty, from < rows.count { picked = [rows[from].id] }
+            for j in (from < i ? Array(from...i) : Array((i...from).reversed())) where !picked.contains(rows[j].id) { picked.append(rows[j].id) }
+        } else {
+            if !picked.isEmpty { picked = [] }
+            select(i); if n >= 2 { choose() }; return
+        }
+        select(i)
+    }
     func selectSide(_ i: Int) { guard !sugg.isEmpty else { return }; inSide = true; ssel = max(0, min(sugg.count - 1, i)); syncSelection() }
     private func syncSelection() {
-        cards.enumerated().forEach { $0.element.selected = !inSide && $0.offset == sel }
+        cards.enumerated().forEach { $0.element.selected = !inSide && $0.offset == sel; $0.element.pick = picked.firstIndex(of: $0.element.row.id).map { $0 + 1 } }
         sugCards.enumerated().forEach { $0.element.selected = inSide && $0.offset == ssel }
     }
 
@@ -215,7 +234,7 @@ final class Panel: NSPanel, NSTextFieldDelegate, NSMenuDelegate, NSPopoverDelega
         case #selector(NSResponder.moveLeft(_:)) where empty, #selector(NSResponder.moveUp(_:)):
             if inSide { ssel == 0 ? select(self.sel) : selectSide(ssel - 1) } else { select(self.sel - 1) }; return true
         case #selector(NSResponder.deleteBackward(_:)) where empty: if let r = selectedRow { deleteItem(r.id) }; return true
-        case #selector(NSResponder.cancelOperation(_:)): close(); return true
+        case #selector(NSResponder.cancelOperation(_:)): if picked.isEmpty { close() } else { picked = []; syncSelection() }; return true   // esc clears a multi-selection first
         case #selector(NSResponder.insertTab(_:)): pinOnly.toggle(); reload(); return true
         default: return false }
     }
@@ -227,8 +246,10 @@ final class Panel: NSPanel, NSTextFieldDelegate, NSMenuDelegate, NSPopoverDelega
         return super.performKeyEquivalent(with: e)
     }
     func choose(invertPlain: Bool = false) {
+        if !inSide, !picked.isEmpty { pasteMany(picked, plain: Prefs.plainPaste != invertPlain); return }
         guard inSide ? ssel < sugg.count : sel < rows.count else { return }
         paste(inSide ? sugg[ssel].id : rows[sel].id, plain: Prefs.plainPaste != invertPlain)
     }
+    func pasteMany(_ ids: [Int64], plain: Bool) { let f = ids.map { store.flavors($0) }.filter { !$0.isEmpty }; picked = []; close(); Injector.pasteMany(f, into: target, plain: plain) }
     func paste(_ id: Int64, plain: Bool) { close(); Injector.paste(flavors: store.flavors(id), into: target, plain: plain) }
 }

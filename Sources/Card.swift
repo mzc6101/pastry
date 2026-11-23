@@ -75,6 +75,7 @@ final class CardView: NSView {
     static let size = NSSize(width: 232, height: 264), inset: CGFloat = 5, radius: CGFloat = 22
     let row: Store.Row; let store: Store; let index: Int
     var selected = false { didSet { needsDisplay = true } }
+    var pick: Int? { didSet { if pick != oldValue { needsDisplay = true } } }   // 1-based order in a ⌘-click multi-selection
     var onClick: ((Int, Int) -> Void)?, onMenu: ((CardView) -> NSMenu?)?
     var suggested = false   // sparkle header, no ⌘N hint
     private var hovered = false, pressed = false
@@ -165,13 +166,17 @@ final class CardView: NSView {
         // footer
         CardView.footer.setFill(); NSRect(x: card.minX, y: card.maxY - 30, width: card.width, height: 30).fill()
         text(row.meta.isEmpty ? label : row.meta, NSRect(x: card.minX + 30, y: card.maxY - 22, width: card.width - 60, height: 14), size: 11, color: .secondaryLabelColor, align: .center)
-        if index < 9, !suggested { text("⌘\(index + 1)", NSRect(x: card.maxX - 40, y: card.maxY - 21, width: 30, height: 14), size: 10, weight: .medium, color: .tertiaryLabelColor, align: .right) }
+        if let n = pick {   // multi-select badge replaces the ⌘N hint
+            let b = NSRect(x: card.maxX - 30, y: card.maxY - 25, width: 20, height: 20)
+            NSColor.controlAccentColor.setFill(); NSBezierPath(ovalIn: b).fill()
+            text("\(n)", NSRect(x: b.minX, y: b.minY + 3, width: b.width, height: 14), size: 11, weight: .bold, color: .white, align: .center)
+        } else if index < 9, !suggested { text("⌘\(index + 1)", NSRect(x: card.maxX - 40, y: card.maxY - 21, width: 30, height: 14), size: 10, weight: .medium, color: .tertiaryLabelColor, align: .right) }
         if row.pin != nil { symbol("pin.fill", in: NSRect(x: card.minX + 8, y: card.maxY - 26, width: 20, height: 22), size: 11, color: .systemOrange) }
         NSGraphicsContext.restoreGraphicsState()
         CardView.rim.setStroke(); shape.lineWidth = 0.5; shape.stroke()
-        if selected {   // concentric ring: 2.5pt gap outside the card, radius grows by the gap
+        if selected || pick != nil {   // concentric ring: 2.5pt gap outside the card, radius grows by the gap
             let ring = NSBezierPath(roundedRect: card.insetBy(dx: -3.5, dy: -3.5), xRadius: R + 3.5, yRadius: R + 3.5)
-            NSColor.controlAccentColor.setStroke(); ring.lineWidth = 3; ring.stroke()
+            NSColor.controlAccentColor.withAlphaComponent(selected ? 1 : 0.55).setStroke(); ring.lineWidth = 3; ring.stroke()
         }
     }
 }

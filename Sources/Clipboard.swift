@@ -107,18 +107,33 @@ enum Injector {
         }
         selfWrite = pb.changeCount
     }
-    static func paste(flavors: [(String, Data)], into app: NSRunningApplication?, plain: Bool = false) {
-        write(flavors, plain: plain)
-        app?.activate()
-        guard AXIsProcessTrusted() else { // needs Accessibility to post events; clip is at least on the pasteboard
-            log("Accessibility permission missing; item copied but Cmd+V not sent"); return
+    static func paste(flavors: [(String, Data)], into app: NSRunningApplication?, plain: Bool = false) { pasteMany([flavors], into: app, plain: plain) }
+    /// Paste several items in order. All-text selections become one paste joined by newlines; anything else
+    /// (images, files) is pasted one item at a time, rewriting the pasteboard before each ⌘V.
+    static func pasteMany(_ items: [[(String, Data)]], into app: NSRunningApplication?, plain: Bool = false) {
+        guard !items.isEmpty else { return }
+        let str = NSPasteboard.PasteboardType.string.rawValue, rich: Set<String> = [NSPasteboard.PasteboardType.fileURL.rawValue, NSPasteboard.PasteboardType.png.rawValue, NSPasteboard.PasteboardType.tiff.rawValue]
+        var queue = items
+        if items.count > 1, items.allSatisfy({ f in f.contains { $0.0 == str } && !f.contains { rich.contains($0.0) } }) {
+            let joined = items.compactMap { f in f.first { $0.0 == str }.map { String(decoding: $0.1, as: UTF8.self) } }.joined(separator: "\n")
+            queue = [[(str, Data(joined.utf8))]]
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            let src = CGEventSource(stateID: .combinedSessionState)
-            for down in [true, false] {
-                let e = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: down)
-                e?.flags = .maskCommand; e?.post(tap: .cghidEventTap)
+        app?.activate()
+        guard AXIsProcessTrusted() else { // needs Accessibility to post events; last clip is at least on the pasteboard
+            write(queue[queue.count - 1], plain: plain); log("Accessibility permission missing; item copied but Cmd+V not sent"); return
+        }
+        func step(_ i: Int) {
+            guard i < queue.count else { return }
+            write(queue[i], plain: plain)
+            DispatchQueue.main.asyncAfter(deadline: .now() + (i == 0 ? 0.15 : 0.05)) {
+                let src = CGEventSource(stateID: .combinedSessionState)
+                for down in [true, false] {
+                    let e = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: down)
+                    e?.flags = .maskCommand; e?.post(tap: .cghidEventTap)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { step(i + 1) }   // let the target read the pasteboard before it changes
             }
         }
+        step(0)
     }
 }
